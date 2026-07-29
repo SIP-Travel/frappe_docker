@@ -128,7 +128,7 @@ services:
         fi
 
     environment:
-      SITE_NAME: ${SITE_NAME:?}
+      SITE_NAME: "erp.sipcorp.id"
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?}
       DB_PASSWORD: ${DB_PASSWORD:?}
 
