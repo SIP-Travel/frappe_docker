@@ -253,6 +253,8 @@ services:
       - |
         set -euo pipefail
 
+        trap 'rc=$$?; echo "ERROR: setup-lms-site failed at line $${LINENO}, exit code $${rc}"; exit "$${rc}"' ERR
+
         cd /home/frappe/frappe-bench
 
         wait-for-it -t 180 db:3306
@@ -265,13 +267,12 @@ services:
         done
 
         echo "common_site_config.json found"
-
         echo "Checking required application code..."
 
         for required_app in payments lms; do
           if [ ! -d "apps/$${required_app}" ]; then
-            echo "ERROR: apps/$${required_app} is missing from the image."
-            echo "Applications available in this image:"
+            echo "ERROR: apps/$${required_app} is missing."
+            echo "Applications available:"
             ls -1 apps
             exit 1
           fi
@@ -279,7 +280,7 @@ services:
           echo "Found apps/$${required_app}"
         done
 
-        if [ ! -d "sites/$${LMS_SITE_NAME}" ]; then
+        if [ ! -f "sites/$${LMS_SITE_NAME}/site_config.json" ]; then
           echo "Creating LMS site: $${LMS_SITE_NAME}"
 
           bench new-site "$${LMS_SITE_NAME}" \
@@ -287,6 +288,8 @@ services:
             --db-root-username root \
             --db-root-password "$${DB_PASSWORD}" \
             --admin-password "$${LMS_ADMIN_PASSWORD}"
+
+          echo "LMS site created successfully"
         else
           echo "Site already exists: $${LMS_SITE_NAME}"
         fi
@@ -294,30 +297,48 @@ services:
         install_if_missing() {
           app_name="$$1"
 
-          if bench --site "$${LMS_SITE_NAME}" list-apps \
-            | grep -Fxq "$${app_name}"; then
+          echo "Checking whether $${app_name} is installed..."
 
+          installed_apps="$$(bench \
+            --site "$${LMS_SITE_NAME}" \
+            list-apps)"
+
+          echo "Current installed apps:"
+          echo "$${installed_apps}"
+
+          if grep -qw "$${app_name}" <<< "$${installed_apps}"; then
             echo "$${app_name} is already installed"
           else
             echo "Installing $${app_name}..."
 
-            bench --site "$${LMS_SITE_NAME}" \
+            bench \
+              --site "$${LMS_SITE_NAME}" \
               install-app "$${app_name}"
+
+            echo "$${app_name} installed successfully"
           fi
         }
 
         install_if_missing payments
         install_if_missing lms
 
-        bench --site "$${LMS_SITE_NAME}" \
+        bench \
+          --site "$${LMS_SITE_NAME}" \
           set-config host_name "https://$${LMS_SITE_NAME}"
+
+        echo "Running site migration..."
 
         bench --site "$${LMS_SITE_NAME}" migrate
         bench --site "$${LMS_SITE_NAME}" clear-cache
         bench --site "$${LMS_SITE_NAME}" clear-website-cache
 
         echo "Applications installed on $${LMS_SITE_NAME}:"
-        bench --site "$${LMS_SITE_NAME}" list-apps
+
+        bench \
+          --site "$${LMS_SITE_NAME}" \
+          list-apps
+
+        echo "LMS site configuration completed successfully"
 
 volumes:
   db-data:
