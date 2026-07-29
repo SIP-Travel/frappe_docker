@@ -62,10 +62,6 @@ jobs:
                   "branch": "main"
               },
               {
-                  "url": "https://github.com/frappe/lms",
-                  "branch": "v2.54.2"
-              },
-              {
                   "url": private_repo("SIP-Travel/institute-lms"),
                   "branch": "main"
               }

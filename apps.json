@@ -4,11 +4,11 @@
       "branch": "version-16"
     },
     {
-      "url": "https://github.com/SIP-Travel/institute-lms",
+      "url": "https://github.com/SIP-Travel/frappe-payments",
       "branch": "main"
     },
     {
-        "url": "https://github.com/SIP-Travel/frappe-payments",
-        "branch": "main"
+      "url": "https://github.com/SIP-Travel/institute-lms",
+      "branch": "main"
     }
   ]
