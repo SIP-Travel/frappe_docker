@@ -268,7 +268,7 @@ services:
 
         echo "Checking required application code..."
 
-        for required_app in payments lms institute_lms; do
+        for required_app in payments lms; do
           if [ ! -d "apps/$${required_app}" ]; then
             echo "ERROR: apps/$${required_app} is missing from the image."
             echo "Applications available in this image:"
@@ -308,7 +308,6 @@ services:
 
         install_if_missing payments
         install_if_missing lms
-        install_if_missing institute_lms
 
         bench --site "$${LMS_SITE_NAME}" \
           set-config host_name "https://$${LMS_SITE_NAME}"
