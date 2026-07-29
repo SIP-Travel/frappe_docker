@@ -46,16 +46,27 @@ jobs:
           username = quote(os.environ["APP_GIT_USERNAME"], safe="")
           token = quote(os.environ["APP_GIT_TOKEN"], safe="")
 
+          def private_repo(repository: str) -> str:
+              return (
+                  f"https://{username}:{token}"
+                  f"@github.com/{repository}.git"
+              )
+
           apps = [
               {
                   "url": "https://github.com/frappe/erpnext",
                   "branch": "version-16"
               },
               {
-                  "url": (
-                      f"https://{username}:{token}"
-                      "@github.com/SIP-Travel/institute-lms.git"
-                  ),
+                  "url": private_repo("SIP-Travel/frappe-payments"),
+                  "branch": "main"
+              },
+              {
+                  "url": "https://github.com/frappe/lms",
+                  "branch": "v2.54.2"
+              },
+              {
+                  "url": private_repo("SIP-Travel/institute-lms"),
                   "branch": "main"
               }
           ]

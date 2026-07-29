@@ -6,5 +6,9 @@
     {
       "url": "https://github.com/SIP-Travel/institute-lms",
       "branch": "main"
+    },
+    {
+        "url": "https://github.com/SIP-Travel/frappe-payments",
+        "branch": "main"
     }
   ]
