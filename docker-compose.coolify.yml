@@ -1,5 +1,5 @@
 x-erpnext-image: &erpnext_image
-  image: frappe/erpnext:${ERPNEXT_VERSION:-version-16}
+  image: ghcr.io/sip-travel/frappe-custom:version-16
   platform: linux/amd64
   pull_policy: always
   restart: unless-stopped
