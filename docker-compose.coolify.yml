@@ -218,6 +218,7 @@ services:
     command:
       - bench
       - schedule
+  
   setup-lms-site:
     <<: *erpnext_image
     restart: "no"
@@ -239,13 +240,10 @@ services:
     depends_on:
       db:
         condition: service_healthy
-
       redis-cache:
         condition: service_started
-
       redis-queue:
         condition: service_started
-
       create-site:
         condition: service_completed_successfully
 
@@ -267,18 +265,31 @@ services:
         done
 
         echo "common_site_config.json found"
-        echo "Checking required application code..."
+        echo "Checking application code in image..."
 
         for required_app in payments lms; do
           if [ ! -d "apps/$${required_app}" ]; then
             echo "ERROR: apps/$${required_app} is missing."
-            echo "Applications available:"
+            echo "Applications available in image:"
             ls -1 apps
             exit 1
           fi
 
           echo "Found apps/$${required_app}"
         done
+
+        echo "Applications registered in sites/apps.txt:"
+        cat sites/apps.txt
+
+        if ! grep -Fxq "payments" sites/apps.txt; then
+          echo "ERROR: payments is not registered in sites/apps.txt"
+          exit 1
+        fi
+
+        if ! grep -Fxq "lms" sites/apps.txt; then
+          echo "ERROR: lms is not registered in sites/apps.txt"
+          exit 1
+        fi
 
         if [ ! -f "sites/$${LMS_SITE_NAME}/site_config.json" ]; then
           echo "Creating LMS site: $${LMS_SITE_NAME}"
@@ -289,56 +300,54 @@ services:
             --db-root-password "$${DB_PASSWORD}" \
             --admin-password "$${LMS_ADMIN_PASSWORD}"
 
-          echo "LMS site created successfully"
+          echo "Site created successfully"
         else
           echo "Site already exists: $${LMS_SITE_NAME}"
         fi
 
-        install_if_missing() {
-          app_name="$$1"
+        echo "Reading currently installed applications..."
 
-          echo "Checking whether $${app_name} is installed..."
+        if ! installed_apps="$$(bench \
+          --site "$${LMS_SITE_NAME}" \
+          list-apps 2>&1)"; then
 
-          installed_apps="$$(bench \
-            --site "$${LMS_SITE_NAME}" \
-            list-apps)"
-
-          echo "Current installed apps:"
+          echo "ERROR: unable to read installed applications:"
           echo "$${installed_apps}"
+          exit 1
+        fi
 
-          if grep -qw "$${app_name}" <<< "$${installed_apps}"; then
-            echo "$${app_name} is already installed"
-          else
-            echo "Installing $${app_name}..."
+        echo "Currently installed applications:"
+        echo "$${installed_apps}"
 
-            bench \
-              --site "$${LMS_SITE_NAME}" \
-              install-app "$${app_name}"
+        if grep -Eq '(^|[[:space:]])lms([[:space:]]|$$)' \
+          <<< "$${installed_apps}"; then
 
-            echo "$${app_name} installed successfully"
-          fi
-        }
+          echo "lms is already installed"
+        else
+          echo "Installing customized LMS..."
 
-        install_if_missing payments
-        install_if_missing lms
+          # LMS will use the customized dependency from apps/payments.
+          bench \
+            --site "$${LMS_SITE_NAME}" \
+            install-app lms
+
+          echo "LMS installed successfully"
+        fi
 
         bench \
           --site "$${LMS_SITE_NAME}" \
           set-config host_name "https://$${LMS_SITE_NAME}"
 
-        echo "Running site migration..."
+        echo "Running migrations..."
 
         bench --site "$${LMS_SITE_NAME}" migrate
         bench --site "$${LMS_SITE_NAME}" clear-cache
         bench --site "$${LMS_SITE_NAME}" clear-website-cache
 
-        echo "Applications installed on $${LMS_SITE_NAME}:"
+        echo "Final installed applications:"
+        bench --site "$${LMS_SITE_NAME}" list-apps
 
-        bench \
-          --site "$${LMS_SITE_NAME}" \
-          list-apps
-
-        echo "LMS site configuration completed successfully"
+        echo "LMS setup completed successfully"
 
 volumes:
   db-data:
