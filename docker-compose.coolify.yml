@@ -165,7 +165,7 @@ services:
       # Use a fixed site name instead of the nginx $host variable.
       # This also prevents Coolify from creating an unwanted "$host"
       # environment variable.
-      FRAPPE_SITE_NAME_HEADER: "$$host"
+      FRAPPE_SITE_NAME_HEADER: ${FRAPPE_SITE_NAME_HEADER:?}
 
       UPSTREAM_REAL_IP_ADDRESS: 0.0.0.0/0
       UPSTREAM_REAL_IP_HEADER: X-Forwarded-For
