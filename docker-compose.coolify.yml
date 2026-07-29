@@ -180,6 +180,8 @@ services:
         condition: service_started
       create-site:
         condition: service_completed_successfully
+      setup-lms-site:
+        condition: service_completed_successfully
 
     volumes:
       - sites:/home/frappe/frappe-bench/sites
@@ -216,6 +218,107 @@ services:
     command:
       - bench
       - schedule
+  setup-lms-site:
+    <<: *erpnext_image
+    restart: "no"
+    exclude_from_hc: true
+
+    entrypoint:
+      - bash
+      - -lc
+
+    environment:
+      LMS_SITE_NAME: "lms.sipinstitute.id"
+      LMS_ADMIN_PASSWORD: ${LMS_ADMIN_PASSWORD:?}
+      DB_PASSWORD: ${DB_PASSWORD:?}
+
+    volumes:
+      - sites:/home/frappe/frappe-bench/sites
+      - logs:/home/frappe/frappe-bench/logs
+
+    depends_on:
+      db:
+        condition: service_healthy
+
+      redis-cache:
+        condition: service_started
+
+      redis-queue:
+        condition: service_started
+
+      create-site:
+        condition: service_completed_successfully
+
+    command:
+      - |
+        set -euo pipefail
+
+        cd /home/frappe/frappe-bench
+
+        wait-for-it -t 180 db:3306
+        wait-for-it -t 180 redis-cache:6379
+        wait-for-it -t 180 redis-queue:6379
+
+        until [ -f sites/common_site_config.json ]; do
+          echo "Waiting for common_site_config.json..."
+          sleep 5
+        done
+
+        echo "common_site_config.json found"
+
+        echo "Checking required application code..."
+
+        for required_app in payments lms institute_lms; do
+          if [ ! -d "apps/$${required_app}" ]; then
+            echo "ERROR: apps/$${required_app} is missing from the image."
+            echo "Applications available in this image:"
+            ls -1 apps
+            exit 1
+          fi
+
+          echo "Found apps/$${required_app}"
+        done
+
+        if [ ! -d "sites/$${LMS_SITE_NAME}" ]; then
+          echo "Creating LMS site: $${LMS_SITE_NAME}"
+
+          bench new-site "$${LMS_SITE_NAME}" \
+            --mariadb-user-host-login-scope='%' \
+            --db-root-username root \
+            --db-root-password "$${DB_PASSWORD}" \
+            --admin-password "$${LMS_ADMIN_PASSWORD}"
+        else
+          echo "Site already exists: $${LMS_SITE_NAME}"
+        fi
+
+        install_if_missing() {
+          app_name="$$1"
+
+          if bench --site "$${LMS_SITE_NAME}" list-apps \
+            | grep -Fxq "$${app_name}"; then
+
+            echo "$${app_name} is already installed"
+          else
+            echo "Installing $${app_name}..."
+
+            bench --site "$${LMS_SITE_NAME}" \
+              install-app "$${app_name}"
+          fi
+        }
+
+        install_if_missing payments
+        install_if_missing lms
+        install_if_missing institute_lms
+
+        bench --site "$${LMS_SITE_NAME}" \
+          set-config host_name "https://$${LMS_SITE_NAME}"
+
+        bench --site "$${LMS_SITE_NAME}" migrate
+        bench --site "$${LMS_SITE_NAME}" clear-cache
+        bench --site "$${LMS_SITE_NAME}" clear-website-cache
+
+        echo "Applications installed on $${LMS_SITE_NAME}:"
+        bench --site "$${LMS_SITE_NAME}" list-apps
 
 volumes:
   db-data:
