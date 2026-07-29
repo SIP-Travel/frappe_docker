@@ -19,31 +19,73 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout frappe_docker
         uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Login to GitHub Container Registry
+      - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push image
+      - name: Generate private apps manifest
+        env:
+          APP_GIT_USERNAME: ${{ secrets.APP_GIT_USERNAME }}
+          APP_GIT_TOKEN: ${{ secrets.APP_GIT_TOKEN }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          from urllib.parse import quote
+
+          username = quote(os.environ["APP_GIT_USERNAME"], safe="")
+          token = quote(os.environ["APP_GIT_TOKEN"], safe="")
+
+          apps = [
+              {
+                  "url": "https://github.com/frappe/erpnext",
+                  "branch": "version-16"
+              },
+              {
+                  "url": (
+                      f"https://{username}:{token}"
+                      "@github.com/SIP-Travel/institute-lms.git"
+                  ),
+                  "branch": "main"
+              }
+          ]
+
+          output = Path(os.environ["RUNNER_TEMP"]) / "apps.json"
+          output.write_text(
+              json.dumps(apps, indent=2),
+              encoding="utf-8"
+          )
+          output.chmod(0o600)
+          PY
+
+      - name: Build and push custom image
         uses: docker/build-push-action@v6
         with:
           context: .
           file: images/layered/Containerfile
-          push: true
+          platforms: linux/amd64
+          pull: true
           no-cache: true
+          push: true
+
           build-args: |
             FRAPPE_PATH=https://github.com/frappe/frappe
             FRAPPE_BRANCH=version-16
+            CACHE_BUST=${{ github.run_id }}
+
           secret-files: |
-            apps_json=./apps.json
+            apps_json=${{ runner.temp }}/apps.json
+
           tags: |
             ghcr.io/sip-travel/frappe-custom:version-16
             ghcr.io/sip-travel/frappe-custom:latest
