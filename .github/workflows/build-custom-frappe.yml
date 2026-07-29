@@ -58,6 +58,10 @@ jobs:
                   "branch": "version-16"
               },
               {
+                  "url": "https://github.com/frappe/hrms",
+                  "branch": "version-16"
+              },
+              {
                   "url": private_repo("SIP-Travel/frappe-payments"),
                   "branch": "main"
               },
