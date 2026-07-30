@@ -45,6 +45,13 @@ VOLUME [ \
 ]
 
 USER root
+# Required by AgriTheory Cloud Storage / python-magic
+RUN apt-get update \
+    && apt-get install --no-install-recommends -y \
+        libmagic1 \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
 # This entrypoint script link build assets of the image to the mounted sites volume at container initialization
 COPY resources/core/main-entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod 755 /usr/local/bin/entrypoint.sh
