@@ -68,6 +68,10 @@ jobs:
               {
                   "url": private_repo("SIP-Travel/institute-lms"),
                   "branch": "main"
+              },
+              {
+                  "url": "https://github.com/agritheory/cloud_storage",
+                  "branch": "version-16"
               }
           ]
 
