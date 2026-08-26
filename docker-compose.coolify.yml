@@ -1,8 +1,9 @@
-# Coolify zero-downtime checklist (do this in the Coolify UI — compose alone cannot
-# keep traffic up while Coolify stops containers before a large image pull):
-# 1. Advanced → Pre Deployment Command: bash scripts/coolify-pre-pull.sh
-# 2. Enable Rolling Updates (requires healthchecks below + default container names).
-# 3. Prefer image tag updates from GHCR; CI must keep layer cache (no no-cache builds).
+# Coolify downtime notes (compose cannot keep traffic up while Coolify stops
+# containers before a large image pull finishes):
+# 1. Do NOT use Coolify "Pre Deployment Command" for docker pull — that hook
+#    runs inside one app container and fails on multi-service compose.
+# 2. Optional host pre-pull: scripts/coolify-pre-pull.sh via SSH/CI before deploy.
+# 3. Prefer smaller pulls: GHCR layer cache in CI (no no-cache builds).
 #
 x-erpnext-image: &erpnext_image
   image: ghcr.io/sip-travel/frappe-custom:version-16
