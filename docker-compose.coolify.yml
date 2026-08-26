@@ -1,3 +1,9 @@
+# Coolify zero-downtime checklist (do this in the Coolify UI — compose alone cannot
+# keep traffic up while Coolify stops containers before a large image pull):
+# 1. Advanced → Pre Deployment Command: bash scripts/coolify-pre-pull.sh
+# 2. Enable Rolling Updates (requires healthchecks below + default container names).
+# 3. Prefer image tag updates from GHCR; CI must keep layer cache (no no-cache builds).
+#
 x-erpnext-image: &erpnext_image
   image: ghcr.io/sip-travel/frappe-custom:version-16
   platform: linux/amd64
@@ -12,6 +18,19 @@ x-backend-defaults: &backend_defaults
   depends_on:
     configurator:
       condition: service_completed_successfully
+
+# Backend ready = can serve API. Do not wait for migrate (setup-lms-site).
+x-backend-healthcheck: &backend_healthcheck
+  healthcheck:
+    test:
+      [
+        "CMD-SHELL",
+        "curl -fsS -H 'Host: erp.sipcorp.id' -H 'X-Frappe-Site-Name: erp.sipcorp.id' http://127.0.0.1:8000/api/method/ping",
+      ]
+    interval: 5s
+    timeout: 5s
+    retries: 24
+    start_period: 30s
 
 services:
   db:
@@ -145,7 +164,7 @@ services:
       - logs:/home/frappe/frappe-bench/logs
 
   backend:
-    <<: *backend_defaults
+    <<: [*backend_defaults, *backend_healthcheck]
 
     environment:
       GUNICORN_THREADS: ${GUNICORN_THREADS:-4}
@@ -173,14 +192,26 @@ services:
       PROXY_READ_TIMEOUT: ${PROXY_READ_TIMEOUT:-120}
       CLIENT_MAX_BODY_SIZE: ${CLIENT_MAX_BODY_SIZE:-50m}
 
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl -fsS -H 'Host: erp.sipcorp.id' http://127.0.0.1:8080/",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 15s
+
+    # Bring nginx up as soon as backend can answer /api/method/ping.
+    # Do NOT wait for setup-lms-site (migrate) — that is the main avoidable
+    # downtime after the image is already pulled.
     depends_on:
       backend:
-        condition: service_started
+        condition: service_healthy
       websocket:
         condition: service_started
       create-site:
-        condition: service_completed_successfully
-      setup-lms-site:
         condition: service_completed_successfully
 
     volumes:
@@ -246,6 +277,9 @@ services:
         condition: service_started
       create-site:
         condition: service_completed_successfully
+      # Migrate after backend is up so the site can serve while this runs.
+      backend:
+        condition: service_healthy
 
     command:
       - |
@@ -338,7 +372,7 @@ services:
           --site "$${LMS_SITE_NAME}" \
           set-config host_name "https://$${LMS_SITE_NAME}"
 
-        echo "Running migrations..."
+        echo "Running migrations (site already serving traffic)..."
 
         bench --site "$${LMS_SITE_NAME}" migrate
         bench --site "$${LMS_SITE_NAME}" clear-cache
