@@ -1,0 +1,112 @@
+# After a new custom image is pushed, pre-pull it on the Coolify *host*
+# (while old containers still serve traffic), run compose pull in the stack
+# directory, then trigger Coolify deploy.
+#
+# Coolify webhooks do NOT pass pullLatestImages=true (Coolify bug) — a host
+# pre-pull + compose pull is required so :version-16 resolves to the new digest.
+#
+# Required GitHub secrets:
+#   COOLIFY_SSH_HOST     — deployment server hostname/IP
+#   COOLIFY_SSH_USER     — SSH user that can run `docker pull` (docker group/root)
+#   COOLIFY_SSH_KEY      — private key for that user
+#   COOLIFY_WEBHOOK_URL  — Coolify deploy webhook (app → Webhooks → Deploy)
+#
+# Optional:
+#   GHCR_PULL_TOKEN      — PAT with read:packages if the host is not logged in
+#   GHCR_PULL_USER       — GHCR username (default: sip-travel)
+#   COOLIFY_COMPOSE_DIR  — absolute path to the Coolify service dir on the host
+#                          (contains docker-compose.yml). Enables `compose pull`
+#                          in the same project Coolify uses.
+#
+# Coolify UI: disable Auto Deploy for this app (or you will race a deploy
+# that pulls without pre-pull). Deploy only via this workflow / the webhook.
+
+name: Deploy Coolify (pre-pull)
+
+on:
+  workflow_run:
+    workflows: ["Build Custom Frappe Image"]
+    types: [completed]
+  workflow_dispatch:
+
+env:
+  IMAGE: ghcr.io/sip-travel/frappe-custom:version-16
+
+jobs:
+  pre-pull-and-deploy:
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pre-pull image on Coolify host
+        uses: appleboy/ssh-action@v1.2.2
+        env:
+          GHCR_PULL_USER: ${{ secrets.GHCR_PULL_USER }}
+          GHCR_PULL_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
+          COOLIFY_COMPOSE_DIR: ${{ secrets.COOLIFY_COMPOSE_DIR }}
+        with:
+          host: ${{ secrets.COOLIFY_SSH_HOST }}
+          username: ${{ secrets.COOLIFY_SSH_USER }}
+          key: ${{ secrets.COOLIFY_SSH_KEY }}
+          script_stop: true
+          envs: GHCR_PULL_USER,GHCR_PULL_TOKEN,COOLIFY_COMPOSE_DIR
+          script: |
+            set -euo pipefail
+            IMAGE="${{ env.IMAGE }}"
+
+            if [ -n "${GHCR_PULL_TOKEN:-}" ]; then
+              echo "${GHCR_PULL_TOKEN}" | docker login ghcr.io \
+                -u "${GHCR_PULL_USER:-sip-travel}" \
+                --password-stdin
+            fi
+
+            echo "Pre-pulling ${IMAGE} while old stack is still up..."
+            docker pull "${IMAGE}"
+
+            IMAGE_ID="$(docker image inspect "${IMAGE}" --format '{{.Id}}')"
+            DIGEST="$(docker image inspect "${IMAGE}" --format '{{index .RepoDigests 0}}')"
+            echo "Local image: ${IMAGE_ID}"
+            echo "Registry digest: ${DIGEST:-unknown}"
+
+            # Coolify deploy webhooks skip `docker compose pull`. Pull in the
+            # service directory so the stack uses the digest we just fetched.
+            if [ -n "${COOLIFY_COMPOSE_DIR:-}" ] && [ -d "${COOLIFY_COMPOSE_DIR}" ]; then
+              COMPOSE_FILE="${COOLIFY_COMPOSE_DIR}/docker-compose.yml"
+              if [ ! -f "${COMPOSE_FILE}" ]; then
+                COMPOSE_FILE="$(find "${COOLIFY_COMPOSE_DIR}" -maxdepth 2 -name 'docker-compose*.yml' | head -1)"
+              fi
+              if [ -n "${COMPOSE_FILE}" ] && [ -f "${COMPOSE_FILE}" ]; then
+                echo "Running compose pull in ${COOLIFY_COMPOSE_DIR}..."
+                docker compose -f "${COMPOSE_FILE}" --project-directory "${COOLIFY_COMPOSE_DIR}" pull
+              else
+                echo "No compose file found under ${COOLIFY_COMPOSE_DIR}; skipped compose pull." >&2
+              fi
+            else
+              echo "COOLIFY_COMPOSE_DIR not set; relying on host docker pull only."
+            fi
+
+            echo "Pre-pull complete."
+
+      - name: Trigger Coolify deploy
+        env:
+          WEBHOOK_URL: ${{ secrets.COOLIFY_WEBHOOK_URL }}
+        run: |
+          set -euo pipefail
+          if [ -z "${WEBHOOK_URL}" ]; then
+            echo "COOLIFY_WEBHOOK_URL secret is required" >&2
+            exit 1
+          fi
+
+          # force=true recreates containers; combined with pre-pull above this
+          # picks up the new local :version-16 digest.
+          DEPLOY_URL="${WEBHOOK_URL}"
+          case "${DEPLOY_URL}" in
+            *force=true*) ;;
+            *\?*) DEPLOY_URL="${DEPLOY_URL}&force=true" ;;
+            *) DEPLOY_URL="${DEPLOY_URL}?force=true" ;;
+          esac
+
+          curl -fsS -X POST "${DEPLOY_URL}" \
+            || curl -fsS -X GET "${DEPLOY_URL}"
+          echo "Coolify deploy triggered (${DEPLOY_URL})."

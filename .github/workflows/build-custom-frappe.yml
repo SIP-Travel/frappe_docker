@@ -14,7 +14,16 @@ on:
       - "apps.json"
       - "images/**"
       - ".github/workflows/build-custom-frappe.yml"
+  repository_dispatch:
+    types: [rebuild-image]
   workflow_dispatch:
+    inputs:
+      cache_bust:
+        description: >-
+          Extra bench-init cache bust (pass LMS commit SHA when triggered
+          from institute-lms so app code is re-fetched from git).
+        required: false
+        default: ""
 
 env:
   REGISTRY: ghcr.io
@@ -41,11 +50,25 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Bust only the bench-init layer when apps.json changes — not on every run.
+      # Bust bench-init when apps.json changes OR when an external trigger
+      # passes cache_bust (institute-lms push). Without the latter, Docker GHA
+      # cache reuses a stale bench-init layer and LMS changes never reach GHCR.
       - name: Compute apps cache key
         id: apps
+        env:
+          EXTRA_CACHE_BUST: >-
+            ${{ github.event.inputs.cache_bust
+                || github.event.client_payload.cache_bust
+                || '' }}
         run: |
-          echo "cache_bust=$(sha256sum apps.json | cut -c1-16)" >> "$GITHUB_OUTPUT"
+          base="$(sha256sum apps.json | cut -c1-16)"
+          if [ -n "${EXTRA_CACHE_BUST}" ]; then
+            bust="${base}-${EXTRA_CACHE_BUST}"
+          else
+            bust="${base}-${GITHUB_SHA}"
+          fi
+          echo "cache_bust=${bust}" >> "$GITHUB_OUTPUT"
+          echo "Using CACHE_BUST=${bust}"
 
       - name: Generate private apps manifest
         env:

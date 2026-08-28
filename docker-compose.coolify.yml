@@ -1,12 +1,17 @@
-# Coolify downtime notes (compose cannot keep traffic up while Coolify stops
-# containers before a large image pull finishes):
-# 1. Do NOT use Coolify "Pre Deployment Command" for docker pull — that hook
-#    runs inside one app container and fails on multi-service compose.
-# 2. Optional host pre-pull: scripts/coolify-pre-pull.sh via SSH/CI before deploy.
-# 3. Prefer smaller pulls: GHCR layer cache in CI (no no-cache builds).
+# Coolify downtime notes:
+# Compose has no rolling updates — Coolify stops containers, then recreates.
+# Long downtime = image pull/extract after stop. Fix that by pre-pulling on the
+# host *before* Coolify deploy (CI: .github/workflows/deploy-coolify.yml).
+# Do NOT use Coolify "Pre Deployment Command" for docker pull (runs in-container
+# and fails on multi-service compose).
+# Residual downtime (~container restart + healthchecks + migrate) remains.
+#
+# GitHub secret COOLIFY_COMPOSE_DIR = Coolify service path on the host
+# (e.g. /data/coolify/services/<uuid>) so deploy CI can run compose pull.
+# Coolify webhooks do not pull latest images by default.
 #
 x-erpnext-image: &erpnext_image
-  image: ghcr.io/sip-travel/frappe-custom:version-16
+  image: ${FRAPPE_CUSTOM_IMAGE:-ghcr.io/sip-travel/frappe-custom:version-16}
   platform: linux/amd64
   pull_policy: always
   restart: unless-stopped
