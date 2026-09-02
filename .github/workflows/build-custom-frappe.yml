@@ -65,7 +65,8 @@ jobs:
           if [ -n "${EXTRA_CACHE_BUST}" ]; then
             bust="${base}-${EXTRA_CACHE_BUST}"
           else
-            bust="${base}-${GITHUB_SHA}"
+            # apps.json hash only — reuse bench-init layer when app list is unchanged.
+            bust="${base}"
           fi
           echo "cache_bust=${bust}" >> "$GITHUB_OUTPUT"
           echo "Using CACHE_BUST=${bust}"
@@ -75,6 +76,12 @@ jobs:
           APP_GIT_USERNAME: ${{ secrets.APP_GIT_USERNAME }}
           APP_GIT_TOKEN: ${{ secrets.APP_GIT_TOKEN }}
         run: |
+          set -euo pipefail
+          if [ -z "${APP_GIT_USERNAME}" ] || [ -z "${APP_GIT_TOKEN}" ]; then
+            echo "ERROR: APP_GIT_USERNAME and APP_GIT_TOKEN secrets must be set on this repo."
+            echo "They are required to clone SIP-Travel/institute-lms during bench init."
+            exit 1
+          fi
           python3 - <<'PY'
           import json
           import os
@@ -100,8 +107,8 @@ jobs:
                   "branch": "version-16",
               },
               {
-                  "url": private_repo("SIP-Travel/frappe-payments"),
-                  "branch": "main",
+                  "url": "https://github.com/frappe/payments",
+                  "branch": "version-16",
               },
               {
                   "url": "https://github.com/agritheory/cloud_storage",
@@ -117,6 +124,17 @@ jobs:
           output.write_text(json.dumps(apps, indent=2), encoding="utf-8")
           output.chmod(0o600)
           PY
+
+      - name: Verify private app repository access
+        env:
+          APP_GIT_USERNAME: ${{ secrets.APP_GIT_USERNAME }}
+          APP_GIT_TOKEN: ${{ secrets.APP_GIT_TOKEN }}
+        run: |
+          set -euo pipefail
+          for repo in SIP-Travel/institute-lms; do
+            echo "Checking access to ${repo}..."
+            git ls-remote "https://${APP_GIT_USERNAME}:${APP_GIT_TOKEN}@github.com/${repo}.git" HEAD
+          done
 
       - name: Build and push
         uses: docker/build-push-action@v6
