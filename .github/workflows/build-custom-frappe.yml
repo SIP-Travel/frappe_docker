@@ -80,11 +80,13 @@ jobs:
           if [ -z "${APP_GIT_USERNAME}" ] || [ -z "${APP_GIT_TOKEN}" ]; then
             echo "ERROR: APP_GIT_USERNAME and APP_GIT_TOKEN secrets must be set on this repo."
             echo "They are required to clone SIP-Travel/institute-lms during bench init."
+            echo "Tip: set APP_GIT_USERNAME to x-access-token and APP_GIT_TOKEN to your PAT."
             exit 1
           fi
           python3 - <<'PY'
           import json
           import os
+          import subprocess
           from pathlib import Path
           from urllib.parse import quote
 
@@ -95,6 +97,13 @@ jobs:
               return (
                   f"https://{username}:{token}"
                   f"@github.com/{repository}.git"
+              )
+
+          for repository in ("SIP-Travel/institute-lms",):
+              print(f"Checking access to {repository}...")
+              subprocess.run(
+                  ["git", "ls-remote", private_repo(repository), "HEAD"],
+                  check=True,
               )
 
           apps = [
@@ -124,17 +133,6 @@ jobs:
           output.write_text(json.dumps(apps, indent=2), encoding="utf-8")
           output.chmod(0o600)
           PY
-
-      - name: Verify private app repository access
-        env:
-          APP_GIT_USERNAME: ${{ secrets.APP_GIT_USERNAME }}
-          APP_GIT_TOKEN: ${{ secrets.APP_GIT_TOKEN }}
-        run: |
-          set -euo pipefail
-          for repo in SIP-Travel/institute-lms; do
-            echo "Checking access to ${repo}..."
-            git ls-remote "https://${APP_GIT_USERNAME}:${APP_GIT_TOKEN}@github.com/${repo}.git" HEAD
-          done
 
       - name: Build and push
         uses: docker/build-push-action@v6
