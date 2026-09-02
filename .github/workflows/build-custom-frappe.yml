@@ -37,18 +37,8 @@ jobs:
       packages: write
 
     steps:
-      - name: Checkout
+      - name: Checkout frappe_docker
         uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
 
       # Bust bench-init when apps.json changes OR when an external trigger
       # passes cache_bust (institute-lms push). Without the latter, Docker GHA
@@ -71,40 +61,41 @@ jobs:
           echo "cache_bust=${bust}" >> "$GITHUB_OUTPUT"
           echo "Using CACHE_BUST=${bust}"
 
-      - name: Generate private apps manifest
+      - name: Resolve institute-lms ref
+        id: lms
         env:
-          APP_GIT_USERNAME: ${{ secrets.APP_GIT_USERNAME }}
-          APP_GIT_TOKEN: ${{ secrets.APP_GIT_TOKEN }}
+          CACHE_BUST: >-
+            ${{ github.event.inputs.cache_bust
+                || github.event.client_payload.cache_bust
+                || '' }}
+        run: |
+          if [ -n "${CACHE_BUST}" ]; then
+            echo "ref=${CACHE_BUST}" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=main" >> "$GITHUB_OUTPUT"
+          fi
+          echo "Checking out institute-lms at ref: $(cat "$GITHUB_OUTPUT" | grep '^ref=' | cut -d= -f2-)"
+
+      - name: Checkout institute-lms
+        uses: actions/checkout@v4
+        with:
+          repository: SIP-Travel/institute-lms
+          ref: ${{ steps.lms.outputs.ref }}
+          token: ${{ secrets.APP_GIT_TOKEN }}
+          path: .build/institute-lms
+          fetch-depth: 1
+
+      - name: Generate apps manifest
         run: |
           set -euo pipefail
-          if [ -z "${APP_GIT_USERNAME}" ] || [ -z "${APP_GIT_TOKEN}" ]; then
-            echo "ERROR: APP_GIT_USERNAME and APP_GIT_TOKEN secrets must be set on this repo."
-            echo "They are required to clone SIP-Travel/institute-lms during bench init."
-            echo "Tip: set APP_GIT_USERNAME to x-access-token and APP_GIT_TOKEN to your PAT."
+          if [ ! -d .build/institute-lms/.git ]; then
+            echo "ERROR: institute-lms checkout is missing under .build/institute-lms"
             exit 1
           fi
           python3 - <<'PY'
           import json
           import os
-          import subprocess
           from pathlib import Path
-          from urllib.parse import quote
-
-          username = quote(os.environ["APP_GIT_USERNAME"], safe="")
-          token = quote(os.environ["APP_GIT_TOKEN"], safe="")
-
-          def private_repo(repository: str) -> str:
-              return (
-                  f"https://{username}:{token}"
-                  f"@github.com/{repository}.git"
-              )
-
-          for repository in ("SIP-Travel/institute-lms",):
-              print(f"Checking access to {repository}...")
-              subprocess.run(
-                  ["git", "ls-remote", private_repo(repository), "HEAD"],
-                  check=True,
-              )
 
           apps = [
               {
@@ -124,7 +115,8 @@ jobs:
                   "branch": "version-16",
               },
               {
-                  "url": private_repo("SIP-Travel/institute-lms"),
+                  # Checked out in CI — no git credentials inside the Docker build.
+                  "url": "file:///opt/frappe/institute-lms",
                   "branch": "main",
               },
           ]
@@ -133,6 +125,16 @@ jobs:
           output.write_text(json.dumps(apps, indent=2), encoding="utf-8")
           output.chmod(0o600)
           PY
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push
         uses: docker/build-push-action@v6
