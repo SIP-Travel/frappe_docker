@@ -19,7 +19,30 @@ RUN --mount=type=secret,id=apps_json,target=/opt/frappe/apps.json,uid=1000,gid=1
   : "${CACHE_BUST}" && \
   export APP_INSTALL_ARGS="" && \
   if [ -f /opt/frappe/apps.json ] && [ -s /opt/frappe/apps.json ]; then \
+    echo "===== apps.json ====="; \
+    cat /opt/frappe/apps.json; \
+    echo "===== local app paths ====="; \
+    python3 - <<'PY' || exit 1
+import json, os, sys
+from urllib.parse import urlparse
+apps = json.load(open("/opt/frappe/apps.json"))
+for app in apps:
+    url = app.get("url") or ""
+    parsed = urlparse(url)
+    if parsed.scheme == "file":
+        path = parsed.path
+        print(f"checking {url} -> {path}")
+        if not os.path.isdir(path):
+            print(f"ERROR: missing local app path: {path}", file=sys.stderr)
+            sys.exit(1)
+        if not os.path.isdir(os.path.join(path, ".git")):
+            print(f"ERROR: {path} is not a git checkout (.git missing)", file=sys.stderr)
+            sys.exit(1)
+        print(f"OK: {path}")
+PY
     export APP_INSTALL_ARGS="--apps_path=/opt/frappe/apps.json"; \
+  else \
+    echo "WARNING: apps.json missing or empty — installing Frappe only"; \
   fi && \
   bench init ${APP_INSTALL_ARGS}\
     --frappe-branch=${FRAPPE_BRANCH} \
@@ -29,8 +52,10 @@ RUN --mount=type=secret,id=apps_json,target=/opt/frappe/apps.json,uid=1000,gid=1
     --skip-redis-config-generation \
     --verbose \
     /home/frappe/frappe-bench 2>&1 | tee /tmp/bench-init.log || { \
-      echo "===== bench init failed — last 120 lines ====="; \
-      tail -120 /tmp/bench-init.log; \
+      echo "===== bench init failed — last 200 lines ====="; \
+      tail -200 /tmp/bench-init.log; \
+      echo "===== apps installed (if any) ====="; \
+      ls -la /home/frappe/frappe-bench/apps 2>/dev/null || true; \
       exit 1; \
     } && \
   cd /home/frappe/frappe-bench && \
