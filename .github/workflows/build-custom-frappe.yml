@@ -85,11 +85,25 @@ jobs:
           path: .build/institute-lms
           fetch-depth: 1
 
+      # bench get-app clones with --branch from apps.json. A SHA checkout is
+      # detached HEAD with no local "main", so create/reset main at HEAD.
+      - name: Point local main at checked-out LMS commit
+        run: |
+          set -euo pipefail
+          git -C .build/institute-lms checkout -B main
+          git -C .build/institute-lms rev-parse --abbrev-ref HEAD
+          git -C .build/institute-lms rev-parse HEAD
+          git -C .build/institute-lms show-ref --verify refs/heads/main
+
       - name: Generate apps manifest
         run: |
           set -euo pipefail
           if [ ! -d .build/institute-lms/.git ]; then
             echo "ERROR: institute-lms checkout is missing under .build/institute-lms"
+            exit 1
+          fi
+          if ! git -C .build/institute-lms show-ref --verify --quiet refs/heads/main; then
+            echo "ERROR: .build/institute-lms has no local main branch for file:// clone"
             exit 1
           fi
           python3 - <<'PY'
