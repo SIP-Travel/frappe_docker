@@ -12,6 +12,7 @@ ARG CACHE_BUST=""
 
 # institute-lms is checked out in CI to .build/institute-lms (private repo).
 COPY --chown=frappe:frappe .build/institute-lms /opt/frappe/institute-lms
+COPY --chown=frappe:frappe images/layered/validate-apps-json.py /opt/frappe/validate-apps-json.py
 
 USER frappe
 
@@ -22,29 +23,12 @@ RUN --mount=type=secret,id=apps_json,target=/opt/frappe/apps.json,uid=1000,gid=1
     echo "===== apps.json ====="; \
     cat /opt/frappe/apps.json; \
     echo "===== local app paths ====="; \
-    python3 - <<'PY' || exit 1
-import json, os, sys
-from urllib.parse import urlparse
-apps = json.load(open("/opt/frappe/apps.json"))
-for app in apps:
-    url = app.get("url") or ""
-    parsed = urlparse(url)
-    if parsed.scheme == "file":
-        path = parsed.path
-        print(f"checking {url} -> {path}")
-        if not os.path.isdir(path):
-            print(f"ERROR: missing local app path: {path}", file=sys.stderr)
-            sys.exit(1)
-        if not os.path.isdir(os.path.join(path, ".git")):
-            print(f"ERROR: {path} is not a git checkout (.git missing)", file=sys.stderr)
-            sys.exit(1)
-        print(f"OK: {path}")
-PY
+    python3 /opt/frappe/validate-apps-json.py /opt/frappe/apps.json; \
     export APP_INSTALL_ARGS="--apps_path=/opt/frappe/apps.json"; \
   else \
     echo "WARNING: apps.json missing or empty — installing Frappe only"; \
   fi && \
-  bench init ${APP_INSTALL_ARGS}\
+  bench init ${APP_INSTALL_ARGS} \
     --frappe-branch=${FRAPPE_BRANCH} \
     --frappe-path=${FRAPPE_PATH} \
     --no-procfile \
