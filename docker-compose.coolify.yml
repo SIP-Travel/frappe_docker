@@ -26,12 +26,13 @@ x-backend-defaults: &backend_defaults
       condition: service_completed_successfully
 
 # Backend ready = can serve API. Do not wait for migrate (setup-lms-site).
+# Host must match the LMS site on this volume (not erp.sipcorp.id).
 x-backend-healthcheck: &backend_healthcheck
   healthcheck:
     test:
       [
         "CMD-SHELL",
-        "curl -fsS -H 'Host: erp.sipcorp.id' -H 'X-Frappe-Site-Name: erp.sipcorp.id' http://127.0.0.1:8000/api/method/ping",
+        "curl -fsS -H \"Host: $${LMS_SITE_NAME:-lms.sipinstitute.id}\" -H \"X-Frappe-Site-Name: $${LMS_SITE_NAME:-lms.sipinstitute.id}\" http://127.0.0.1:8000/api/method/ping",
       ]
     interval: 5s
     timeout: 5s
@@ -187,9 +188,8 @@ services:
       BACKEND: backend:8000
       SOCKETIO: websocket:9000
 
-      # Use a fixed site name instead of the nginx $host variable.
-      # This also prevents Coolify from creating an unwanted "$host"
-      # environment variable.
+      # Leave FRAPPE_SITE_NAME_HEADER unset so nginx-entrypoint defaults to $host
+      # (multi-site: erp.sipcorp.id + lms.sipinstitute.id). Do not hardcode erp.
 
       UPSTREAM_REAL_IP_ADDRESS: 0.0.0.0/0
       UPSTREAM_REAL_IP_HEADER: X-Forwarded-For
@@ -197,12 +197,15 @@ services:
 
       PROXY_READ_TIMEOUT: ${PROXY_READ_TIMEOUT:-120}
       CLIENT_MAX_BODY_SIZE: ${CLIENT_MAX_BODY_SIZE:-50m}
+      LMS_SITE_NAME: ${LMS_SITE_NAME:-lms.sipinstitute.id}
 
     healthcheck:
+      # Probe ping with the LMS site Host — GET / with erp.sipcorp.id was 500
+      # and marked the stack degraded even when the LMS site was fine.
       test:
         [
           "CMD-SHELL",
-          "curl -fsS -H 'Host: erp.sipcorp.id' http://127.0.0.1:8080/",
+          "curl -fsS -H \"Host: $${LMS_SITE_NAME:-lms.sipinstitute.id}\" -H \"X-Frappe-Site-Name: $${LMS_SITE_NAME:-lms.sipinstitute.id}\" http://127.0.0.1:8080/api/method/ping",
         ]
       interval: 5s
       timeout: 5s
